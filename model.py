@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-
+from torch.nn.functional import interpolate
 
 class Demucs(nn.Module):
     def __init__(self, num_layers=2, audio_channels=1, num_channels=64, kernel_size=8, stride=4, resample=1):
@@ -40,13 +40,26 @@ class Demucs(nn.Module):
     
 
     def forward(self, x):
-        layer_outputs = []
+        
+        # Upsampling
+        x = interpolate(x, scale_factor=self.resample, mode='linear', align_corners=True)
+
+        # Autoencoder calculations
+        encoder_outputs = []
+        i = 0
         for layer in self.encoder:
             x = layer(x)
-            layer_outputs.append(x)
+            encoder_outputs.append(x)
         for layer in self.decoder:
-            x += layer_outputs[-1-i]
+            print(x.size())
+            print(encoder_outputs[-1-i].size())
+            print(layer)
+            x = x +  encoder_outputs[-1-i][..., :x.shape[-1]]
             x = layer(x)
+            i +=1
+        
+        # Downsampling
+        x = interpolate(x, scale_factor=1/self.resample, mode='linear', align_corners=True)
 
 
     def print_model(self):
@@ -61,8 +74,19 @@ class Demucs(nn.Module):
 
 
 def test():
-    demucs = Demucs(num_layers=1, resample=1)
-    demucs.print_model()
+
+    x = torch.tensor([[range(256)]], dtype=torch.float32)
+    '''
+    print(a)
+    a = interpolate(a, scale_factor=2, mode='linear', align_corners=True)
+    print(a)
+    a = interpolate(a, scale_factor=1/2, mode='linear', align_corners=True)
+    print(a)
+    '''
+
+    demucs = Demucs(num_layers=2, resample=2)
+    #demucs.print_model()
+    demucs.forward(x)
 
 if __name__ == '__main__':
     test()
