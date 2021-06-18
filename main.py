@@ -1,3 +1,4 @@
+from data import Dataset
 import random
 import torch
 from torch import nn
@@ -52,7 +53,7 @@ def train():
     # Simulation 2 causal (H=64 number of hidden channels)
     # Simulation 3 causal (H=48 number of hidden channels)
     simulation = 1
-    epochs = 50
+    epochs = 1
     loss_func = nn.MSELoss()
     demucs, optimizer = simulation_selector(simulation)
     
@@ -60,24 +61,29 @@ def train():
         demucs.cuda()
     
     
-    x, y = [], []
-    for num in random.sample(range(1000), 1000):
-        x.append(num/1000)
-        y.append(x) 
-    x = torch.tensor([[x]], dtype=torch.float32)
-    y = torch.tensor([[y]], dtype=torch.float32)
+    train_dataset = Dataset('dataset/test')
+    x, y, sample_rate = train_dataset.get_data()
+
+    train_noisy = torch.from_numpy(x[0])
+    train_clean = torch.from_numpy(y[0])
+
+    train_noisy = train_noisy.unsqueeze(-2).unsqueeze(-2)
+    train_clean = train_clean.unsqueeze(-2).unsqueeze(-2)
+
+    print(train_noisy.size(), train_clean.size(), sample_rate)
 
 
     for epoch in range(epochs):
-        y_pred = demucs.forward(x)
-        loss = loss_func(y_pred, y)
+        train_clean_pred = demucs.forward(train_noisy)
+        loss = loss_func(train_clean_pred, train_clean)
         loss.backward()
+        print(loss.item())
         optimizer.step()
         optimizer.zero_grad()
 
         if (epoch+1)%10 == 0:
             print(f'Epoch {epoch+1}, Loss {loss.item():.3f}')
-        
+   
     
 
 if __name__ == '__main__':
