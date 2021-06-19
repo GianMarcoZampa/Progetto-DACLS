@@ -1,6 +1,7 @@
 import os
 from scipy.io import wavfile
 import numpy as np
+import torch
 
 
 class Dataset():
@@ -17,8 +18,17 @@ class Dataset():
         for file in os.listdir(self.dir + '/clean/'):
             sample_rate, data = wavfile.read(self.dir + '/clean/' + file)
             data_y.append(data.astype(np.float32))
-    
-        return np.asarray(data_x), np.asarray(data_y), sample_rate
+        
+        data_x = np.asarray(data_x)
+        data_y = np.asarray(data_y)
+        
+        for i in range(len(data_x)):
+            data_x[i] = torch.from_numpy(data_x[i])
+            data_y[i] = torch.from_numpy(data_y[i])
+
+            data_x[i] = data_x[i].unsqueeze(-2).unsqueeze(-2)
+            data_y[i] = data_y[i].unsqueeze(-2).unsqueeze(-2)
+        return data_x, data_y, sample_rate
 
 
 def test(dir):

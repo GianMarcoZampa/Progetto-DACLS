@@ -62,15 +62,10 @@ def train():
     
     
     train_dataset = Dataset('dataset/test')
-    x, y, sample_rate = train_dataset.get_data()
+    train_noisy, train_clean, sample_rate = train_dataset.get_data()
 
-    train_noisy = torch.from_numpy(x[0])
-    train_clean = torch.from_numpy(y[0])
 
-    train_noisy = train_noisy.unsqueeze(-2).unsqueeze(-2)
-    train_clean = train_clean.unsqueeze(-2).unsqueeze(-2)
-
-    print(train_noisy.size(), train_clean.size(), sample_rate)
+    print(train_noisy[0].size(), train_clean[0].size(), sample_rate)
 
 
     for epoch in range(epochs):

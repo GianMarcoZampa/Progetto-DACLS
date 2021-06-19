@@ -6,10 +6,10 @@ import math
 
 class Demucs(nn.Module):
 
-    def __init__(self, num_layers=2, audio_channels=1, num_channels=64, kernel_size=8, stride=4, resample=1, bidirectional=True):
+    def __init__(self, audio_channels=1, num_layers=5, num_channels=64, kernel_size=8, stride=2, resample=2, bidirectional=True):
         super().__init__()
-        self.num_layers = num_layers
         self.audio_channels = audio_channels
+        self.num_layers = num_layers
         self.num_channels = num_channels
         self.kernel_size = kernel_size
         self.stride = stride
@@ -53,14 +53,15 @@ class Demucs(nn.Module):
 
     
     def pad_length(self, length):
-        final_length = length
+        
         # Determinate the padding length for the input and the output to be of equal length
+        final_length = length
         final_length = math.ceil(final_length * self.resample) # Length after the upsampling
-        # Length after the encoding network
+        # Length after encoding network
         for idx in range(self.num_layers):
             final_length = math.ceil((final_length - self.kernel_size) / self.stride) + 1
             final_length = max(final_length, 1)
-        # Length after the decoding network
+        # Length after decoding network
         for idx in range(self.num_layers):
             final_length = (final_length - 1) * self.stride + self.kernel_size
         final_length = int(math.ceil(final_length / self.resample)) # Length after the downsampling
@@ -69,8 +70,13 @@ class Demucs(nn.Module):
 
     def forward(self, x):
 
+        # Normalize
+        std = x.std(dim=-1, keepdim=True)
+        x = x/std
+
         # Padding
-        x = nn.functional.pad(x, pad=[0, self.pad_length(x.size()[-1])])
+        x_len = x.size()[-1]
+        x = nn.functional.pad(x, pad=[0, self.pad_length(x_len)])
 
         # Upsampling
         x = interpolate(x, scale_factor=self.resample, mode='linear', align_corners=True)
@@ -97,13 +103,20 @@ class Demucs(nn.Module):
         for layer in self.decoder:
             # If first layer of decoder add the output of the coerrespondig encoder to the input
             if i%4 == 0:
-                in_sum = encoder_outputs.pop(-1)[..., :x.shape[-1]]
+                in_sum = encoder_outputs.pop(-1)
                 x = x + in_sum
             x = layer(x)
             i +=1
         
         # Downsampling
         x = interpolate(x, scale_factor=1/self.resample, mode='linear', align_corners=True)
+        
+        # Eliminate padding
+        x = x[..., :x_len]
+
+        # Denomarlize
+        return std * x
+
 
     def print_model(self):
         print('\n\nencoder:\n')
@@ -117,10 +130,8 @@ class Demucs(nn.Module):
 
 
 def test():
-    x = []
-    for num in random.sample(range(1000000), 999999):
-        x.append(num/100000) 
-    x = torch.tensor([[x]], dtype=torch.float32)
+    x = torch.randn(1,1,1000)
+    print(x.size())
 
     demucs = Demucs(num_layers=4, resample=2)
     #demucs.print_model()
