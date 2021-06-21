@@ -1,6 +1,10 @@
+import numpy as np
 import torch
+from torch._C import dtype
 import torch.nn as nn
 import random
+from filters import BP_filter
+import matplotlib.pyplot as plt
 
 class Random_shift(nn.Module):
 # Randomly shifts the track
@@ -27,19 +31,44 @@ class Remix(nn.Module):
 
 class Band_mask(nn.Module):
 # Maskes bands of frequencies
-    def forward(self):
-        pass
+    def __init__(self, sample_rate, min_freq, max_freq):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.filter = BP_filter(min_freq, max_freq)
+
+
+    def forward(self, noisy_track, clean_track):
+        noisy_track = self.filter.forward(noisy_track)
+        clean_track = self.filter.forward(clean_track)
+        return noisy_track, clean_track
 
 
 
 def test():
-    x = torch.randn(1,1,100)
-    y = torch.randn(1,1,100)
+    x = torch.randn(1,1,1000)
+    y = torch.randn(1,1,1000)
+    t = np.linspace(0,1000, num=1000, dtype=np.float32)
     
     shift = Random_shift(10)
     remix = Remix()
+    band_mask = Band_mask(48000, 0.1, 0.15)
     shifted_x, shifted_y = shift.forward(x, y)
     remixed_x, remixed_y = remix.forward(x, y)
+    masked_x, masked_y = band_mask.forward(x, y)
+
+    plt.figure()
+    plt.title('x')
+    plt.plot(t, x[-1][-1])
+    plt.figure()
+    plt.title('shifted x')
+    plt.plot(t, shifted_x[-1][-1])
+    plt.figure()
+    plt.title('remixed x')
+    plt.plot(t, remixed_x[-1][-1])
+    plt.figure()
+    plt.title('masked x')
+    plt.plot(t, masked_x[-1][-1])
+    plt.show()
 
 
 
