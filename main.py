@@ -16,7 +16,7 @@ def simulation_selector(num, batch_size):
         S = 2 # Layer stride
         U = 2 # Resampling factor
 
-        demucs = model.Demucs(audio_channels=batch_size, num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=True)
+        demucs = model.Demucs(num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=True)
         optimizer = torch.optim.Adam(demucs.parameters(), lr=3e-4, betas=(0.9, 0.9999))
     
     elif num == 2:
@@ -27,7 +27,7 @@ def simulation_selector(num, batch_size):
         S = 4 # Layer stride
         U = 4 # Resampling factor
 
-        demucs = model.Demucs(audio_channels=batch_size, num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=False)
+        demucs = model.Demucs(num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=False)
         optimizer = torch.optim.Adam(demucs.parameters(), lr=3e-4, betas=(0.9, 0.9999))
 
     elif num == 3:
@@ -38,12 +38,12 @@ def simulation_selector(num, batch_size):
         S = 4 # Layer stride
         U = 4 # Resampling factor
 
-        demucs = model.Demucs(audio_channels=batch_size, num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=False)
+        demucs = model.Demucs(num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=False)
         optimizer = torch.optim.Adam(demucs.parameters(), lr=3e-4, betas=(0.9, 0.9999))
     
     else:
         print("\nDefault simulation parameters\n")
-        demucs = model.Demucs(audio_channels=batch_size)
+        demucs = model.Demucs()
         optimizer = torch.optim.Adam(demucs.parameters(), lr=3e-4, betas=(0.9, 0.9999))
     
     return demucs, optimizer
