@@ -3,7 +3,7 @@ from pesq import pesq
 from loss import Multi_STFT_loss
 from data import Audio_dataset, parse_data
 import torch
-import model
+from model import Demucs
 
 
 
@@ -20,7 +20,7 @@ def simulation_selector(num, batch_size):
         S = 2 # Layer stride
         U = 2 # Resampling factor
 
-        demucs = model.Demucs(num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=True)
+        demucs = Demucs(num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=True)
         optimizer = torch.optim.Adam(demucs.parameters(), lr=3e-4, betas=(0.9, 0.9999))
     
     elif num == 2:
@@ -31,7 +31,7 @@ def simulation_selector(num, batch_size):
         S = 4 # Layer stride
         U = 4 # Resampling factor
 
-        demucs = model.Demucs(num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=False)
+        demucs = Demucs(num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=False)
         optimizer = torch.optim.Adam(demucs.parameters(), lr=3e-4, betas=(0.9, 0.9999))
 
     elif num == 3:
@@ -42,19 +42,19 @@ def simulation_selector(num, batch_size):
         S = 4 # Layer stride
         U = 4 # Resampling factor
 
-        demucs = model.Demucs(num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=False)
+        demucs = Demucs(num_layers=L, num_channels=H, kernel_size=K, stride=S, resample=U, bidirectional=False)
         optimizer = torch.optim.Adam(demucs.parameters(), lr=3e-4, betas=(0.9, 0.9999))
     
     else:
         print("\nDefault simulation parameters\n")
-        demucs = model.Demucs()
+        demucs = Demucs()
         optimizer = torch.optim.Adam(demucs.parameters(), lr=3e-4, betas=(0.9, 0.9999))
     
     return demucs, optimizer
 
 
     
-def train(simulation, dir, epochs, batch_size=1):
+def train(simulation, dir, epochs, batch_size=1, save_path=''):
 
     loss_func = Multi_STFT_loss()
     demucs, optimizer = simulation_selector(simulation, batch_size)
@@ -88,16 +88,16 @@ def train(simulation, dir, epochs, batch_size=1):
             # Set the parameter gradients to zero
             optimizer.zero_grad()
 
-            # forward pass
+            # Forward pass
             outputs = demucs.forward(noisy_data)
 
-            # compute loss
+            # Compute loss
             loss = loss_func(outputs, clean_data)
 
-            # backward propagation
+            # Backward propagation
             loss.backward()
 
-            # optimization (update weights)
+            # Optimization (update weights)
             optimizer.step()
 
             # accumulate loss
@@ -107,9 +107,15 @@ def train(simulation, dir, epochs, batch_size=1):
 
         print(f'Epoch {epoch}/{epochs} - Loss: {epoch_mean_loss:.3f}')
 
+    # Save the model
+    torch.save(demucs, save_path)
 
-def evaluate(model, dir, batch_size=1):
-    batch_size = 1
+
+def evaluate(model_path, dir, batch_size=1):
+
+    # Loading the trained model
+    demucs = torch.load(model_path)
+    
     #parse_data(dir+'_noisy.csv', os.path.join(dir, 'noisy'))
 
     test_dataset = Audio_dataset(dir+'_noisy.csv', dir)
@@ -123,7 +129,7 @@ def evaluate(model, dir, batch_size=1):
                 noisy_data = torch.unsqueeze(noisy_data, 0)
                 clean_data = torch.unsqueeze(clean_data, 0)
 
-        y_pred = model.forward(noisy_data)
+        y_pred = demucs.forward(noisy_data)
         pesq_value += pesq(test_dataset.sample_rate, clean_data, y_pred, 'wb')
 
     pesq_value /= test_dataset.__len__()
@@ -133,9 +139,11 @@ def evaluate(model, dir, batch_size=1):
 
 
 if __name__ == '__main__':
+    simulation = 1
+    model_path = ''
     train_dataset_path = os.path.join('dataset', 'test')
     test_dataset_path = os.path.join('dataset', 'test')
 
-    train(simulation=1, dir=train_dataset_path, epochs=1)
-    
-    pesq = evaluate(model, dir=test_dataset_path)
+    train(simulation=simulation, dir=train_dataset_path, epochs=1)
+
+    pesq = evaluate(model_path=model_path, dir=test_dataset_path)
