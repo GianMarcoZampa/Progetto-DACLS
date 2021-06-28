@@ -69,6 +69,8 @@ def train(simulation, dir, epochs, batch_size=1, save_path=''):
     demucs = demucs.to(device)
     demucs.train()
 
+    min_mean_loss = None
+
     # Training
     for epoch in range(1, epochs+1):
 
@@ -104,17 +106,21 @@ def train(simulation, dir, epochs, batch_size=1, save_path=''):
             epoch_loss += loss.item()
 
         epoch_mean_loss = epoch_loss/len(train_dataloader)
-
         print(f'Epoch {epoch}/{epochs} - Loss: {epoch_mean_loss:.3f}')
 
-    # Save the model
-    torch.save(demucs, save_path)
+        if epoch_mean_loss < min_mean_loss or min_mean_loss == None:
+            # Save the model
+            torch.save(demucs, save_path)
+
+            min_mean_loss = epoch_mean_loss
+
 
 
 def evaluate(model_path, dir, batch_size=1):
 
     # Loading the trained model
     demucs = torch.load(model_path)
+    demucs.eval()
     
     #parse_data(dir+'_noisy.csv', os.path.join(dir, 'noisy'))
 
@@ -140,10 +146,12 @@ def evaluate(model_path, dir, batch_size=1):
 
 if __name__ == '__main__':
     simulation = 1
-    model_path = ''
+    model_path = os.path.join('models', 'trained_model.pt')
     train_dataset_path = os.path.join('dataset', 'test')
     test_dataset_path = os.path.join('dataset', 'test')
 
     train(simulation=simulation, dir=train_dataset_path, epochs=1)
 
-    pesq = evaluate(model_path=model_path, dir=test_dataset_path)
+    pesq_value = evaluate(model_path=model_path, dir=test_dataset_path)
+
+    print(pesq_value)
