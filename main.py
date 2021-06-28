@@ -1,13 +1,17 @@
 import os
+from pesq import pesq
 from loss import Multi_STFT_loss
 from data import Audio_dataset, parse_data
-from evaluation import evaluate_model
 import torch
 import model
 
 
 
 def simulation_selector(num, batch_size):
+    # Simulation 1 not causal
+    # Simulation 2 causal (H=64 number of hidden channels)
+    # Simulation 3 causal (H=48 number of hidden channels)
+
     if num == 1:
         print("\nSimulation parameters n 1\n")
         L = 5 # Number of layers
@@ -50,18 +54,13 @@ def simulation_selector(num, batch_size):
 
 
     
-def train(dir):
-    # Simulation 1 not causal
-    # Simulation 2 causal (H=64 number of hidden channels)
-    # Simulation 3 causal (H=48 number of hidden channels)
-    simulation = 1
-    epochs = 1
-    batch_size = 1
+def train(simulation, dir, epochs, batch_size=1):
+
     loss_func = Multi_STFT_loss()
     demucs, optimizer = simulation_selector(simulation, batch_size)
 
     #parse_data(dir+'_noisy.csv', os.path.join(dir, 'noisy'))
-
+    
     train_dataset = Audio_dataset(dir+'_noisy.csv', dir)
 
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
@@ -70,7 +69,7 @@ def train(dir):
     demucs = demucs.to(device)
     demucs.train()
 
-
+    # Training
     for epoch in range(1, epochs+1):
 
         epoch_loss = 0.0
@@ -107,8 +106,36 @@ def train(dir):
         epoch_mean_loss = epoch_loss/len(train_dataloader)
 
         print(f'Epoch {epoch}/{epochs} - Loss: {epoch_mean_loss:.3f}')
+
+
+def evaluate(model, dir, batch_size=1):
+    batch_size = 1
+    #parse_data(dir+'_noisy.csv', os.path.join(dir, 'noisy'))
+
+    test_dataset = Audio_dataset(dir+'_noisy.csv', dir)
+    test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     
+    # Evaluation
+    pesq_value = 0
+
+    for noisy_data, clean_data in test_dataloader:
+        if len(noisy_data.size()) == 2:
+                noisy_data = torch.unsqueeze(noisy_data, 0)
+                clean_data = torch.unsqueeze(clean_data, 0)
+
+        y_pred = model.forward(noisy_data)
+        pesq_value += pesq(test_dataset.sample_rate, clean_data, y_pred, 'wb')
+
+    pesq_value /= test_dataset.__len__()
+
+    return pesq_value
+
+
 
 if __name__ == '__main__':
-    dataset_path = os.path.join('dataset', 'test')
-    train(dataset_path)
+    train_dataset_path = os.path.join('dataset', 'test')
+    test_dataset_path = os.path.join('dataset', 'test')
+
+    train(simulation=1, dir=train_dataset_path, epochs=1)
+    
+    pesq = evaluate(model, dir=test_dataset_path)
