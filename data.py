@@ -4,6 +4,8 @@ import torch
 from torch._C import dtype
 import torch.nn as nn
 import pandas as pd
+from tqdm import tqdm
+import torchaudio
 
 
 
@@ -33,60 +35,78 @@ def parse_data(meta_file, target_dir):
 
 
 
+def preload_audio(meta_file, data_dir, s_len, s_stride=None):
+    """
+    todo: implement stride management and dynamic stride
+    :param meta_file:
+    :param data_dir:
+    :param s_len:
+    :param s_stride:
+    :return:
+    """
+    meta_data = pd.read_csv(meta_file)
+    data_pairs = torch.empty(1, 2 * s_len)
+    for clip_id in tqdm(range(len(meta_data))):
+        noisy_clip, noisy_sr = torchaudio.load(os.path.join(data_dir, 'noisy', meta_data.iloc[clip_id, 0]))
+        clean_clip, clean_sr = torchaudio.load(os.path.join(data_dir, 'clean', meta_data.iloc[clip_id, 0]))
+
+        pad_len = s_len - noisy_clip.shape[1] % s_len
+
+        if pad_len != 0:
+            noisy_clip = torch.nn.functional.pad(noisy_clip, (0, pad_len), "constant", 0)
+            clean_clip = torch.nn.functional.pad(clean_clip, (0, pad_len), "constant", 0)
+
+        for t in range(int(noisy_clip.shape[1] / s_len)):
+            start = t * s_len
+            end = (t + 1) * s_len
+            noisy_segment = noisy_clip[:, start:end]
+            clean_segment = clean_clip[:, start:end]
+            noisy_clean_pair = torch.cat((noisy_segment, clean_segment), dim=1)
+            data_pairs = torch.cat((data_pairs, noisy_clean_pair))
+
+    print(f'Created segmented dataset tensor with shape {data_pairs.shape}')
+
+    return data_pairs
+
+
+
 class Audio_dataset(torch.utils.data.Dataset):
-    
-    def __init__(self, csv_file, data_dir):
-        self.meta_file = pd.read_csv(csv_file)
-        self.data_dir = data_dir
-        self.pad_length = self.max_length()
+    def __init__(self, data_file, segm_len):
+            self.segm_dataset = torch.load(data_file)
+            self.segm_len = segm_len
 
     def __len__(self):
-        return len(self.meta_file)
+        return self.segm_dataset.size()[0]
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        wav_file = self.meta_file.iloc[idx, 0]
+        noisy_segm = self.segm_dataset[idx, 0:self.segm_len]
+        clean_segm = self.segm_dataset[idx, self.segm_len:2*self.segm_len]
 
-        # in questo modo sono sicuro che i due files caricati sono accoppiati correttamente perchè hanno lo stesso nome
-        # il sample rate mi serve??
-        sample_rate, noisy_sample = wavfile.read(os.path.join(self.data_dir, 'noisy', wav_file))
-        sample_rate, clean_sample = wavfile.read(os.path.join(self.data_dir, 'clean', wav_file))
+        if len(noisy_segm.size()) == 1:
+                noisy_segm = torch.unsqueeze(noisy_segm, 0)
+                clean_segm = torch.unsqueeze(clean_segm, 0)
 
-        noisy_sample = torch.from_numpy(noisy_sample)
-        clean_sample = torch.from_numpy(clean_sample)
-        # qui chiamo le trasformazioni pad e upsample per uniformare la lunghezza dei campioni
-
-        if noisy_sample.size()[-1] < self.pad_length:
-            noisy_sample = self.padding(noisy_sample)
-            clean_sample = self.padding(clean_sample)
-        
-        return noisy_sample.type(torch.FloatTensor), clean_sample.type(torch.FloatTensor)
-
-    def max_length(self):
-        max_length = 0
-        for i in range(self.__len__()):
-            wav_file = self.meta_file.iloc[i, 0]
-            _, sample = wavfile.read(os.path.join(self.data_dir, 'noisy', wav_file))
-            max_length = max(max_length, len(sample))
-        return max_length
-
-    def padding(self, x):
-        x = nn.functional.pad(x, pad=[0, self.pad_length-x.size()[-1]])
-        return x
+        return noisy_segm, clean_segm
 
 
 
-def test(dir):
+def generate_parsed_file(dataset):
 
-    #parse_data(dir+'_noisy.csv', os.path.join(dir, 'noisy'))
-    #parse_data(dir+'_clean.csv', os.path.join(dir, 'clean'))
-    data = Audio_dataset(dir+'_noisy.csv', dir)
-    print(data.__len__())
-    data.__getitem__(123)
-    print(data.max_length())
+    dataset_dir = os.path.join('dataset', dataset)
+    parse_data(dataset+'_meta_file.csv', os.path.join(dataset_dir, 'noisy'))
+    segm_dataset = preload_audio(dataset+'_meta_file.csv', dataset_dir, 48000)
+    torch.save(segm_dataset, 'dataset_'+dataset+'.pt')
+
+    train_dataset = Audio_dataset('dataset_'+dataset+'.pt', 48000)
+    print('Dataset done')
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=4)
+    print('Dataloader done')
+    for n, data in enumerate(train_dataloader):
+        print(f'Elemento {n} - {data[0].shape} - {data[1].shape}')
 
 
 if __name__ == '__main__':
-    test('dataset/test')
+    generate_parsed_file('test')
