@@ -1,12 +1,12 @@
 import torch
 from torch import nn
 from torch.nn.functional import interpolate
-import random
+from torchinfo import summary
 import math
 
 class Demucs(nn.Module):
 
-    def __init__(self, audio_channels=1, num_layers=5, num_channels=64, kernel_size=8, stride=2, resample=2, bidirectional=True):
+    def __init__(self, audio_channels=1, num_layers=5, num_channels=64, kernel_size=8, stride=2, resample=2,LSTM=True, bidirectional=True):
         super().__init__()
         self.audio_channels = audio_channels
         self.num_layers = num_layers
@@ -14,6 +14,7 @@ class Demucs(nn.Module):
         self.kernel_size = kernel_size
         self.stride = stride
 
+        self.LSTM = LSTM
         self.bidirectional = bidirectional
         
         # Check if resample is not a valide value
@@ -32,14 +33,14 @@ class Demucs(nn.Module):
         channels = num_channels
 
         for layer in range(self.num_layers):
-            self.encoder.append(nn.Conv1d(in_channels=in_channels, out_channels=channels, kernel_size=self.kernel_size, stride=self.stride))
+            self.encoder.append(nn.Conv1d(in_channels=in_channels, out_channels=channels, kernel_size=self.kernel_size, stride=self.stride, padding=3))
             self.encoder.append(nn.ReLU())
             self.encoder.append(nn.Conv1d(in_channels=channels, out_channels=2*channels, kernel_size=1, stride=1))
             self.encoder.append(nn.GLU(dim=1))
             
             if layer > 0:
                 self.decoder.insert(0, nn.ReLU())
-            self.decoder.insert(0, nn.ConvTranspose1d(in_channels=channels, out_channels=in_channels, kernel_size=self.kernel_size, stride=self.stride))
+            self.decoder.insert(0, nn.ConvTranspose1d(in_channels=channels, out_channels=in_channels, kernel_size=self.kernel_size, stride=self.stride, padding=3))
             self.decoder.insert(0, nn.GLU(dim=1))
             self.decoder.insert(0, nn.Conv1d(in_channels=channels, out_channels=2*channels, kernel_size=1, stride=1))
                
@@ -47,25 +48,10 @@ class Demucs(nn.Module):
             in_channels = channels
             channels = 2*channels
         
-        self.lstm.append(nn.LSTM(bidirectional=self.bidirectional, num_layers=2, hidden_size=in_channels, input_size=in_channels))
-        if self.bidirectional:
-            self.lstm.append(nn.Linear(2*in_channels, in_channels)) # Resize BiLSTM output
-
-    
-    def pad_length(self, length):
-        
-        # Determinate the padding length for the input and the output to be of equal length
-        final_length = length
-        final_length = math.ceil(final_length * self.resample) # Length after the upsampling
-        # Length after encoding network
-        for idx in range(self.num_layers):
-            final_length = math.ceil((final_length - self.kernel_size) / self.stride) + 1
-            final_length = max(final_length, 1)
-        # Length after decoding network
-        for idx in range(self.num_layers):
-            final_length = (final_length - 1) * self.stride + self.kernel_size
-        final_length = int(math.ceil(final_length / self.resample)) # Length after the downsampling
-        return int(final_length) - length
+        if self.LSTM:
+            self.lstm.append(nn.LSTM(bidirectional=self.bidirectional, num_layers=2, hidden_size=in_channels, input_size=in_channels))
+            if self.bidirectional:
+                self.lstm.append(nn.Linear(2*in_channels, in_channels)) # Resize BiLSTM output
 
 
     def forward(self, x):
@@ -73,30 +59,34 @@ class Demucs(nn.Module):
         # Normalize
         std = x.std(dim=-1, keepdim=True)
         x = x/std
-
-        # Padding
-        x_len = x.size()[-1]
-        x = nn.functional.pad(x, pad=[0, self.pad_length(x_len)])
+        #print(f'Before interpolation: {x.shape}')
 
         # Upsampling
-        x = interpolate(x, scale_factor=self.resample, mode='linear', align_corners=True)
+        x = interpolate(x, scale_factor=self.resample, mode='linear', align_corners=True, recompute_scale_factor=True)
+        #print(f'After upsample: {x.shape}')
 
         # Encoding
         encoder_outputs = []
         i = 0
         for layer in self.encoder:
             x = layer(x)
+            #print(f'Encoder: {x.shape}')
             # If last layer of encoder add the output to the skip network
             if i%4 == 3:
                 encoder_outputs.append(x)
             i += 1
-        
+
         # BiLSTM
-        x = x.permute(2, 0, 1)
-        x, _ = self.lstm[0](x)
-        if self.bidirectional:
-            x = self.lstm[1](x)
-        x = x.permute(1, 2, 0)
+        if self.LSTM:
+            x = x.permute(2, 0, 1)
+            #print(f'Input LSTM 1: {x.shape}')
+            x, _ = self.lstm[0](x)
+            #print(f'Output LSTM 1: {x.shape}')
+            if self.bidirectional:
+                x = self.lstm[1](x)
+                #print(f'Output LSTM 2: {x.shape}')
+            x = x.permute(1, 2, 0)
+            #print(f'After permutation: {x.shape}')
 
         # Decoding
         i = 0
@@ -106,13 +96,12 @@ class Demucs(nn.Module):
                 in_sum = encoder_outputs.pop(-1)
                 x = x + in_sum
             x = layer(x)
+            #print(f'Decoder: {x.shape}')
             i +=1
         
         # Downsampling
-        x = interpolate(x, scale_factor=1/self.resample, mode='linear', align_corners=True)
-        
-        # Eliminate padding
-        x = x[..., :x_len]
+        x = interpolate(x, scale_factor=1/self.resample, mode='linear', align_corners=True, recompute_scale_factor=True)
+        #print(f'After downsample: {x.shape}')
 
         # Denomarlize
         return std * x
@@ -130,12 +119,15 @@ class Demucs(nn.Module):
 
 
 def test():
-    x = torch.randn(1,1,1000)
-    print(x.size())
+    x = torch.randn(2,1,48000)
 
-    demucs = Demucs(num_layers=4, resample=2)
+    demucs = Demucs()
     #demucs.print_model()
-    demucs.forward(x)
+    y = demucs.forward(x)
+    print(y.size())
+
+    #summary(demucs, input_size=(1, 1, 48000))
+
 
 if __name__ == '__main__':
     test()
