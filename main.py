@@ -3,6 +3,7 @@ from pesq import pesq
 from loss import Multi_STFT_loss
 from data import Audio_dataset, parse_data
 import torch
+import time
 from model import Demucs
 
 
@@ -54,16 +55,16 @@ def simulation_selector(num, batch_size):
 
 
     
-def train(simulation, dir, epochs, batch_size=1, save_path=''):
+def train(simulation, dataset, epochs, batch_size=1, save_path=''):
 
     loss_func = Multi_STFT_loss()
     demucs, optimizer = simulation_selector(simulation, batch_size)
 
-    #parse_data(dir+'_noisy.csv', os.path.join(dir, 'noisy'))
+    #parse_data(dataset+'_meta_file.csv', os.path.join('dataset', dataset, 'noisy'))
     
-    train_dataset = Audio_dataset(dir+'_noisy.csv', dir)
+    train_dataset = Audio_dataset('dataset_'+dataset+'.pt', 48000)
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=3)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     demucs = demucs.to(device)
@@ -73,34 +74,39 @@ def train(simulation, dir, epochs, batch_size=1, save_path=''):
 
     # Training
     for epoch in range(1, epochs+1):
-
+        epoch_time = time.time()
         epoch_loss = 0.0
 
         for noisy_data, clean_data in train_dataloader:
-            
-            # Adjust Tensor Size to 3
-            if len(noisy_data.size()) == 2:
-                noisy_data = torch.unsqueeze(noisy_data, 0)
-                clean_data = torch.unsqueeze(clean_data, 0)
 
             # Send data to device: cuda or cpu
             noisy_data = noisy_data.to(device)
             clean_data = clean_data.to(device)
 
+            ts = time.time()
             # Set the parameter gradients to zero
             optimizer.zero_grad()
+            print(f'Zero gradients time: {time.time()-ts}')
 
+            ts = time.time()
             # Forward pass
             outputs = demucs.forward(noisy_data)
+            print(f'Forward time: {time.time()-ts}')
 
+            ts = time.time()
             # Compute loss
             loss = loss_func(outputs, clean_data)
+            print(f'Loss time: {time.time()-ts}')
 
+            ts = time.time()
             # Backward propagation
             loss.backward()
+            print(f'Backward time: {time.time()-ts}')
 
+            ts = time.time()
             # Optimization (update weights)
             optimizer.step()
+            print(f'Optimization time: {time.time()-ts}')
 
             # accumulate loss
             epoch_loss += loss.item()
@@ -113,29 +119,37 @@ def train(simulation, dir, epochs, batch_size=1, save_path=''):
             torch.save(demucs, save_path)
 
             min_mean_loss = epoch_mean_loss
+        
+        print(f'Epoch time: {time.time()-epoch_time}')
 
 
 
-def evaluate(model_path, dir, batch_size=1):
+def evaluate(model_path, dataset, batch_size=1):
 
-    # Loading the trained model
+    # Loading trained model and sending to device
     demucs = torch.load(model_path)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    demucs = demucs.to(device)
     demucs.eval()
-    
-    #parse_data(dir+'_noisy.csv', os.path.join(dir, 'noisy'))
 
-    test_dataset = Audio_dataset(dir+'_noisy.csv', dir)
+    #parse_data(dataset+'_meta_file.csv', os.path.join('dataset', dataset, 'noisy'))
+
+    test_dataset = Audio_dataset('dataset_'+dataset+'.pt', 48000)
     test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     
     # Evaluation
     pesq_value = 0
 
     for noisy_data, clean_data in test_dataloader:
-        if len(noisy_data.size()) == 2:
-                noisy_data = torch.unsqueeze(noisy_data, 0)
-                clean_data = torch.unsqueeze(clean_data, 0)
 
+        # Send data to device: cuda or cpu
+        noisy_data = noisy_data.to(device)
+        clean_data = clean_data.to(device)
+
+        # Forward
         y_pred = demucs.forward(noisy_data)
+
+        # PESQ evaluation
         pesq_value += pesq(test_dataset.sample_rate, clean_data, y_pred, 'wb')
 
     pesq_value /= test_dataset.__len__()
@@ -147,11 +161,10 @@ def evaluate(model_path, dir, batch_size=1):
 if __name__ == '__main__':
     simulation = 1
     model_path = os.path.join('models', 'trained_model.pt')
-    train_dataset_path = os.path.join('dataset', 'test')
-    test_dataset_path = os.path.join('dataset', 'test')
+    dataset = 'test'
+    
+    train(simulation=simulation, dataset=dataset, epochs=1, batch_size=16)
 
-    train(simulation=simulation, dir=train_dataset_path, epochs=1)
-
-    pesq_value = evaluate(model_path=model_path, dir=test_dataset_path)
+    pesq_value = evaluate(model_path=model_path, dataset=dataset)
 
     print(pesq_value)
