@@ -70,6 +70,73 @@ def preload_audio(meta_file, data_dir, s_len, s_stride=None):
 
 
 
+class Audio_dataset_v1(torch.utils.data.Dataset):
+    
+    def __init__(self, csv_file, data_dir, cut=True, samples=96000):
+        '''
+        :param csv_file: csv file path containg meta data
+        :param data_dir: data directory path
+        :param cut: enable data narrowing
+        :param samples: number of samples of narrowed fata
+        '''
+        self.meta_file = pd.read_csv(csv_file)
+        self.data_dir = data_dir
+        self.pad_length = self.max_length()
+        self.cut = cut
+        if self.cut:
+            self.samples = samples
+
+
+    def __len__(self):
+        return len(self.meta_file)
+
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        wav_file = self.meta_file.iloc[idx, 0]
+
+        # in questo modo sono sicuro che i due files caricati sono accoppiati correttamente perchè hanno lo stesso nome
+        # il sample rate mi serve??
+        sample_rate, noisy_sample = wavfile.read(os.path.join(self.data_dir, 'noisy', wav_file))
+        sample_rate, clean_sample = wavfile.read(os.path.join(self.data_dir, 'clean', wav_file))
+
+        noisy_sample = torch.from_numpy(noisy_sample)
+        clean_sample = torch.from_numpy(clean_sample)
+
+
+        if noisy_sample.size()[-1] < self.pad_length:
+            noisy_sample = self.padding(noisy_sample)
+            clean_sample = self.padding(clean_sample)
+
+        # Cut the tensor to self.samples
+        if self.cut:
+            start = int(torch.rand(1).item()*self.samples)
+            if noisy_sample.size()[-1] > self.samples:
+                noisy_sample = torch.narrow(noisy_sample, 0, start, self.samples)
+                clean_sample = torch.narrow(clean_sample, 0, start, self.samples)
+
+        if len(noisy_sample.shape) == 1:
+                noisy_sample = torch.unsqueeze(noisy_sample, 0)
+                clean_sample = torch.unsqueeze(clean_sample, 0)
+
+        return noisy_sample.type(torch.FloatTensor), clean_sample.type(torch.FloatTensor)
+
+    def max_length(self):
+        max_length = 0
+        for i in range(self.__len__()):
+            wav_file = self.meta_file.iloc[i, 0]
+            _, sample = wavfile.read(os.path.join(self.data_dir, 'noisy', wav_file))
+            max_length = max(max_length, len(sample))
+        return max_length
+
+    def padding(self, x):
+        x = nn.functional.pad(x, pad=[0, self.pad_length-x.size()[-1]])
+        return x
+
+
+
 class Audio_dataset(torch.utils.data.Dataset):
     def __init__(self, data_file, segm_len):
             self.segm_dataset = torch.load(data_file)
@@ -108,5 +175,14 @@ def generate_parsed_file(dataset):
         print(f'Elemento {n} - {data[0].shape} - {data[1].shape}')
 
 
+def test_dataset(dataset):
+    dataset_dir = os.path.join('dataset', dataset)
+    train_dataset = Audio_dataset_v1(dataset+'_meta_file.csv', dataset_dir)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=4)
+    for n, data in enumerate(train_dataloader):
+        print(f'Elemento {n} - {data[0].shape} - {data[1].shape}')
+
+
 if __name__ == '__main__':
-    generate_parsed_file('test')
+    #generate_parsed_file('test')
+    test_dataset('test')
